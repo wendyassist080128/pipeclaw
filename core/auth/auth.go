@@ -3,7 +3,6 @@ package auth
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -11,9 +10,9 @@ import (
 const adminFile = "data/admin.json"
 
 type Admin struct {
-	Username       string `json:"username"`
-	PasswordHash   string `json:"password_hash"`
-	PasswordChanged bool  `json:"password_changed"`
+	Username        string `json:"username"`
+	PasswordHash    string `json:"password_hash"`
+	PasswordChanged bool   `json:"password_changed"`
 }
 
 // AdminExists checks if admin account exists
