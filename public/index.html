@@ -152,6 +152,11 @@
             min-width: 150px;
             cursor: move;
             user-select: none;
+            z-index: 10;
+        }
+        .canvas-node:hover {
+            border-color: #a855f7;
+            box-shadow: 0 5px 20px rgba(108, 92, 231, 0.3);
         }
         .canvas-node .node-label {
             font-weight: 600;
@@ -183,6 +188,7 @@
             height: 3px;
             background: #6c5ce7;
             transform-origin: 0 50%;
+            z-index: 1;
         }
 
         /* Deploy Button */
@@ -431,6 +437,10 @@
     <script>
         let ws = null;
         let isDeployed = false;
+        let currentPipeline = null;
+        let draggedNode = null;
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
 
         // Login
         async function login() {
@@ -497,8 +507,8 @@
         // Load Pipeline
         async function loadPipeline() {
             const res = await fetch('/api/pipeline');
-            const pipeline = await res.json();
-            renderCanvas(pipeline);
+            currentPipeline = await res.json();
+            renderCanvas(currentPipeline);
         }
 
         // Render Canvas
@@ -506,26 +516,122 @@
             const canvas = document.getElementById('canvas');
             canvas.innerHTML = '';
 
-            // Render nodes
-            pipeline.nodes.forEach(node => {
-                const el = document.createElement('div');
-                el.className = 'canvas-node';
-                el.style.left = node.x + 'px';
-                el.style.top = node.y + 'px';
-                el.innerHTML = `
-                    <div class="node-label">${node.label}</div>
-                    <div class="node-type">${node.type}</div>
-                    <div class="node-handle input"></div>
-                    <div class="node-handle output"></div>
-                `;
-                canvas.appendChild(el);
-            });
+            // Render edges first (so they appear behind nodes)
+            if (pipeline.edges) {
+                pipeline.edges.forEach(edge => {
+                    const fromNode = pipeline.nodes.find(n => n.id === edge.from);
+                    const toNode = pipeline.nodes.find(n => n.id === edge.to);
+                    if (fromNode && toNode) {
+                        const edgeEl = document.createElement('div');
+                        edgeEl.className = 'canvas-edge';
+                        const startX = fromNode.x + 150;
+                        const startY = fromNode.y + 40;
+                        const endX = toNode.x;
+                        const endY = toNode.y + 40;
+                        const length = Math.sqrt(Math.pow(endX - startX, 2) + Math.pow(endY - startY, 2));
+                        const angle = Math.atan2(endY - startY, endX - startX) * 180 / Math.PI;
+                        edgeEl.style.width = length + 'px';
+                        edgeEl.style.left = startX + 'px';
+                        edgeEl.style.top = startY + 'px';
+                        edgeEl.style.transform = `rotate(${angle}deg)`;
+                        canvas.appendChild(edgeEl);
+                    }
+                });
+            }
 
-            // Render edges
-            pipeline.edges.forEach(edge => {
-                const fromNode = pipeline.nodes.find(n => n.id === edge.from);
-                const toNode = pipeline.nodes.find(n => n.id === edge.to);
+            // Render nodes
+            if (pipeline.nodes) {
+                pipeline.nodes.forEach(node => {
+                    const el = document.createElement('div');
+                    el.className = 'canvas-node';
+                    el.style.left = (node.x || 0) + 'px';
+                    el.style.top = (node.y || 0) + 'px';
+                    el.dataset.nodeId = node.id;
+                    el.innerHTML = `
+                        <div class="node-label">${node.label}</div>
+                        <div class="node-type">${node.type}</div>
+                        <div class="node-handle input"></div>
+                        <div class="node-handle output"></div>
+                    `;
+                    
+                    // Make node draggable
+                    el.addEventListener('mousedown', (e) => startDrag(e, node, el));
+                    
+                    canvas.appendChild(el);
+                });
+            }
+        }
+
+        // Drag functionality
+        function startDrag(e, node, el) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            draggedNode = node;
+            const rect = el.getBoundingClientRect();
+            dragOffsetX = e.clientX - rect.left;
+            dragOffsetY = e.clientY - rect.top;
+            
+            el.style.zIndex = 100;
+            
+            document.addEventListener('mousemove', dragNode);
+            document.addEventListener('mouseup', stopDrag);
+        }
+
+        function dragNode(e) {
+            if (!draggedNode) return;
+            
+            const canvas = document.getElementById('canvas');
+            const canvasRect = canvas.getBoundingClientRect();
+            
+            let newX = e.clientX - canvasRect.left - dragOffsetX;
+            let newY = e.clientY - canvasRect.top - dragOffsetY;
+            
+            // Keep within canvas bounds
+            newX = Math.max(0, Math.min(newX, canvasRect.width - 150));
+            newY = Math.max(0, Math.min(newY, canvasRect.height - 80));
+            
+            draggedNode.x = newX;
+            draggedNode.y = newY;
+            
+            const el = document.querySelector(`[data-node-id="${draggedNode.id}"]`);
+            if (el) {
+                el.style.left = newX + 'px';
+                el.style.top = newY + 'px';
+            }
+            
+            // Update edges
+            renderEdges();
+        }
+
+        function stopDrag() {
+            if (draggedNode) {
+                // Save the updated positions
+                savePipeline();
+            }
+            
+            const el = document.querySelector(`[data-node-id="${draggedNode?.id}"]`);
+            if (el) {
+                el.style.zIndex = 10;
+            }
+            
+            draggedNode = null;
+            document.removeEventListener('mousemove', dragNode);
+            document.removeEventListener('mouseup', stopDrag);
+        }
+
+        function renderEdges() {
+            // Remove old edges
+            document.querySelectorAll('.canvas-edge').forEach(e => e.remove());
+            
+            if (!currentPipeline || !currentPipeline.edges) return;
+            
+            // Re-render edges
+            currentPipeline.edges.forEach(edge => {
+                const fromNode = currentPipeline.nodes.find(n => n.id === edge.from);
+                const toNode = currentPipeline.nodes.find(n => n.id === edge.to);
                 if (fromNode && toNode) {
+                    const canvas = document.getElementById('canvas');
                     const edgeEl = document.createElement('div');
                     edgeEl.className = 'canvas-edge';
                     const startX = fromNode.x + 150;
@@ -541,6 +647,21 @@
                     canvas.appendChild(edgeEl);
                 }
             });
+        }
+
+        // Save Pipeline
+        async function savePipeline() {
+            if (!currentPipeline) return;
+            
+            try {
+                await fetch('/api/pipeline', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(currentPipeline)
+                });
+            } catch (err) {
+                console.error('Failed to save pipeline:', err);
+            }
         }
 
         // Deploy

@@ -41,9 +41,9 @@ func main() {
 			ID:   "main",
 			Name: "Main Pipeline",
 			Nodes: []pipeline.Node{
-				{ID: "input", Type: "input", Label: "Input"},
-				{ID: "session:main", Type: "session", Label: "Session: Main"},
-				{ID: "output", Type: "output", Label: "Output"},
+				{ID: "input", Type: "input", Label: "Input", X: 50, Y: 150},
+				{ID: "session:main", Type: "session", Label: "Session: Main", X: 250, Y: 150},
+				{ID: "output", Type: "output", Label: "Output", X: 450, Y: 150},
 			},
 			Edges: []pipeline.Edge{
 				{From: "input", To: "session:main"},
