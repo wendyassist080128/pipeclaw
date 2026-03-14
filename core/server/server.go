@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"log"
+	"net/http"
 	"os"
 	"sync"
 	"time"
@@ -72,6 +73,11 @@ func Start(port string) error {
 	api.Post("/pipeline", handleSavePipeline)
 	api.Post("/pipeline/deploy", handleDeploy)
 	api.Post("/pipeline/undeploy", handleUndeploy)
+
+	// Workflow routes (saved workflows)
+	api.Get("/workflows", handleListWorkflows)
+	api.Post("/workflows", handleSaveWorkflow)
+	api.Get("/workflows/:id", handleGetWorkflow)
 
 	// WebSocket for real-time chat
 	app.Use("/ws/chat", websocket.New(handleChatWS, websocket.Config{
@@ -258,6 +264,144 @@ func handleUndeploy(c *fiber.Ctx) error {
 	broadcastDeployment(false)
 
 	return c.JSON(fiber.Map{"success": true})
+}
+
+// Workflow handlers
+func handleListWorkflows(c *fiber.Ctx) error {
+	log.Printf("📋 Listing workflows")
+
+	workflows, err := loadAllWorkflows()
+	if err != nil {
+		log.Printf("❌ Failed to list workflows: %v", err)
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to list workflows"})
+	}
+
+	return c.JSON(workflows)
+}
+
+func handleSaveWorkflow(c *fiber.Ctx) error {
+	log.Printf("💾 Saving workflow")
+
+	var req struct {
+		Name        string           `json:"name"`
+		Description string           `json:"description"`
+		Pipeline    pipeline.Pipeline `json:"pipeline"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		log.Printf("❌ Workflow save parse error: %v", err)
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
+	}
+
+	if req.Name == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "Workflow name is required"})
+	}
+
+	workflow := SavedWorkflow{
+		ID:          generateID(),
+		Name:        req.Name,
+		Description: req.Description,
+		Pipeline:    req.Pipeline,
+		CreatedAt:   time.Now().Format(time.RFC3339),
+		UpdatedAt:   time.Now().Format(time.RFC3339),
+	}
+
+	if err := saveWorkflow(&workflow); err != nil {
+		log.Printf("❌ Workflow save error: %v", err)
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to save workflow"})
+	}
+
+	log.Printf("✅ Workflow saved: %s", workflow.Name)
+	return c.JSON(fiber.Map{"success": true, "id": workflow.ID})
+}
+
+func handleGetWorkflow(c *fiber.Ctx) error {
+	workflowID := c.Params("id")
+	log.Printf("📖 Getting workflow: %s", workflowID)
+
+	workflow, err := loadWorkflow(workflowID)
+	if err != nil {
+		log.Printf("❌ Failed to load workflow: %v", err)
+		return c.Status(404).JSON(fiber.Map{"error": "Workflow not found"})
+	}
+
+	return c.JSON(workflow)
+}
+
+// Workflow storage
+type SavedWorkflow struct {
+	ID          string           `json:"id"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	Pipeline    pipeline.Pipeline `json:"pipeline"`
+	CreatedAt   string           `json:"created_at"`
+	UpdatedAt   string           `json:"updated_at"`
+}
+
+func getWorkflowsPath() string {
+	os.MkdirAll("data/workflows", 0755)
+	return "data/workflows"
+}
+
+func loadAllWorkflows() ([]SavedWorkflow, error) {
+	workflowDir := getWorkflowsPath()
+	files, err := os.ReadDir(workflowDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []SavedWorkflow{}, nil
+		}
+		return nil, err
+	}
+
+	var workflows []SavedWorkflow
+	for _, file := range files {
+		if !file.IsDir() && file.Name() != "index.json" {
+			data, err := os.ReadFile(workflowDir + "/" + file.Name())
+			if err != nil {
+				continue
+			}
+
+			var workflow SavedWorkflow
+			if err := json.Unmarshal(data, &workflow); err != nil {
+				continue
+			}
+
+			workflows = append(workflows, workflow)
+		}
+	}
+
+	return workflows, nil
+}
+
+func saveWorkflow(workflow *SavedWorkflow) error {
+	workflowDir := getWorkflowsPath()
+	filePath := workflowDir + "/" + workflow.ID + ".json"
+
+	data, err := json.MarshalIndent(workflow, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(filePath, data, 0644)
+}
+
+func loadWorkflow(workflowID string) (*SavedWorkflow, error) {
+	filePath := getWorkflowsPath() + "/" + workflowID + ".json"
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	var workflow SavedWorkflow
+	if err := json.Unmarshal(data, &workflow); err != nil {
+		return nil, err
+	}
+
+	return &workflow, nil
+}
+
+func generateID() string {
+	return time.Now().Format("20060102150405")
 }
 
 // WebSocket handlers
