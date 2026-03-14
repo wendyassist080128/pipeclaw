@@ -3,14 +3,12 @@ package server
 import (
 	"encoding/json"
 	"log"
-	"net/http"
 	"os"
 	"sync"
 	"time"
 
 	"pipeclaw/core/auth"
 	"pipeclaw/core/pipeline"
-	"pipeclaw/internal/logger"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/websocket/v2"
@@ -127,8 +125,8 @@ func handleLogin(c *fiber.Ctx) error {
 	if !admin.PasswordChanged {
 		log.Printf("ℹ️  Password change required for %s", creds.Username)
 		return c.JSON(fiber.Map{
-			"success":                    false,
-			"password_change_required":   true,
+			"success":                  false,
+			"password_change_required": true,
 		})
 	}
 
